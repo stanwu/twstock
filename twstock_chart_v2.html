@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>台股報價</title>
+
+  <!-- CDN JS：axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <!-- CDN JS：Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 1rem;
+      line-height: 1.6;
+    }
+    h1 { margin-bottom: 0.5rem; }
+    .row { margin-bottom: 0.75rem; }
+    label { display: inline-block; width: 80px; }
+    input[type="text"] { padding: 0.3rem 0.5rem; }
+    button { padding: 0.3rem 0.8rem; cursor: pointer; }
+    #price { font-size: 1.8rem; font-weight: 700; }
+    #status { font-size: 0.9rem; color: #666; }
+    table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.5rem; text-align: right; }
+    th { background: #f5f5f5; }
+    th:first-child, td:first-child { text-align: left; }
+
+    .card {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 320px; /* 固定高度，寬度 RWD */
+    }
+    .chart-container canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>台股報價</h1>
+
+  <div class="row">
+    <label for="symbol">股票代碼</label>
+    <input id="symbol" type="text" value="2330" />
+    <button id="btnFetch">查詢</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="card">
+    <h2>最近 30 天收盤價折線圖</h2>
+    <div class="chart-container">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>報價與最近 10 日簡表</h2>
+
+    <div class="row">
+      <span>最新收盤價：</span><span id="price">-</span>
+    </div>
+    <div class="row">
+      <span>日期：</span><span id="date">-</span>
+    </div>
+
+    <table id="historyTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>開盤</th>
+          <th>最高</th>
+          <th>最低</th>
+          <th>收盤</th>
+          <th>成交量</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const BASE_URL = "https://api.finmindtrade.com/api/v4/data";
+    let priceChart = null;
+
+    function renderChart(labels, prices, symbol) {
+      const ctx = document.getElementById("priceChart").getContext("2d");
+
+      if (priceChart) {
+        priceChart.destroy();
+      }
+
+      priceChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: symbol + " 收盤價",
+            data: prices,
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false, // 讓高度跟著容器
+          scales: {
+            x: {
+              ticks: {
+                maxTicksLimit: 8
+              }
+            },
+            y: {
+              beginAtZero: false
+            }
+          },
+          plugins: {
+            legend: {
+              display: true
+            },
+            tooltip: {
+              mode: "index",
+              intersect: false
+            }
+          }
+        }
+      });
+    }
+
+    async function fetchTaiwanStockPrice(stockId) {
+      const statusEl = document.getElementById("status");
+      const priceEl = document.getElementById("price");
+      const dateEl = document.getElementById("date");
+      const table = document.getElementById("historyTable");
+      const tbody = table.querySelector("tbody");
+
+      statusEl.textContent = "載入中...";
+      priceEl.textContent = "-";
+      dateEl.textContent = "-";
+      table.style.display = "none";
+      tbody.innerHTML = "";
+
+      try {
+        const today = new Date();
+        const endDate = today.toISOString().slice(0, 10);
+        const start = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const startDate = start.toISOString().slice(0, 10);
+
+        const params = {
+          dataset: "TaiwanStockPrice",
+          data_id: stockId,
+          start_date: startDate,
+          end_date: endDate
+          // 若你有 FinMind token，可加上 token: "YOUR_TOKEN"
+        };
+
+        const res = await axios.get(BASE_URL, { params });
+        const body = res.data;
+
+        if (body.status !== 200) {
+          statusEl.textContent = "API 回傳錯誤：" + body.msg;
+          return;
+        }
+
+        const data = body.data;
+        if (!data || data.length === 0) {
+          statusEl.textContent = "查無資料，請確認股票代碼是否正確。";
+          return;
+        }
+
+        // 依日期排序（由舊到新）
+        data.sort((a, b) => a.date.localeCompare(b.date));
+
+        const latest = data[data.length - 1];
+        priceEl.textContent = latest.close;
+        dateEl.textContent = latest.date;
+        statusEl.textContent = "";
+
+        const labels = data.map(row => row.date);
+        const prices = data.map(row => row.close);
+        renderChart(labels, prices, stockId);
+
+        data.slice(-10).forEach(row => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.date}</td>
+            <td>${row.open}</td>
+            <td>${row.max}</td>
+            <td>${row.min}</td>
+            <td>${row.close}</td>
+            <td>${row.Trading_Volume}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+        table.style.display = "table";
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "取得資料失敗（可能是 CORS 或網路問題），請打開 Console 檢查錯誤訊息。";
+      }
+    }
+
+    document.getElementById("btnFetch").addEventListener("click", () => {
+      const symbol = document.getElementById("symbol").value.trim();
+      if (!symbol) return;
+      fetchTaiwanStockPrice(symbol);
+    });
+
+    // 預設載入一次
+    fetchTaiwanStockPrice(document.getElementById("symbol").value.trim());
+  </script>
+</body>
+</html>

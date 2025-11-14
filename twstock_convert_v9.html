@@ -1,0 +1,268 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>台股換股計算器 v9</title>
+
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 1rem;
+  line-height: 1.6;
+}
+
+.value-red {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #d00000;
+  text-align: right;
+}
+.qty-black {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #000;
+  text-align: right;
+}
+
+/* 股票代號較大 */
+.symbol-large {
+  font-size: 1.6rem;
+  font-weight: 800;
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.convert-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.convert-grid-3-center {
+  display: grid;
+  grid-template-columns: 1fr 60px 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+
+.section-title {
+  font-weight:600;
+  margin-bottom:0.25rem;
+  font-size:0.95rem;
+}
+
+.chart-container {
+  width: 100%;
+  height: 320px;
+}
+.chart-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 免責小字 */
+.disclaimer {
+  font-size: 0.75rem;
+  color: #777;
+  margin-top: 1rem;
+  line-height: 1.5;
+}
+</style>
+</head>
+
+<body>
+<h1>台股換股計算器 v9</h1>
+
+<!-- 基本設定 -->
+<div class="card">
+  <h2>基本設定</h2>
+  <div><label>來源股票</label><input id="symbolA" value="2330" /></div>
+  <div><label>目標股票</label><input id="symbolB" value="0050" /></div>
+  <button id="btnFetch">刷新</button>
+  <div id="status"></div>
+</div>
+
+<!-- 先顯示折線圖 -->
+<div class="card">
+  <h2>30 日漲跌幅比較（%）</h2>
+  <div class="chart-container"><canvas id="priceChart"></canvas></div>
+</div>
+
+<!-- 再顯示換股試算 -->
+<div class="card">
+  <h2>換股試算</h2>
+
+  <!-- 最新收盤價 -->
+  <div class="section-title">最新收盤價</div>
+  <div class="convert-grid-3">
+    <div>
+      <span id="priceA">-</span>
+      <span id="labelSymbolA" class="symbol-large">2330</span>
+    </div>
+
+    <div></div>
+
+    <div>
+      <span id="priceB">-</span>
+      <span id="labelSymbolB" class="symbol-large">0050</span>
+    </div>
+  </div>
+
+  <!-- 可換得股數 -->
+  <div class="section-title" style="margin-top:1rem;">可換得股數</div>
+  <div class="convert-grid-3-center">
+    <div>
+      <label>來源股數</label>
+      <input id="qtyA" type="number" value="100" />
+    </div>
+
+    <div style="text-align:center;font-size:2rem;">⇄</div>
+
+    <div id="qtyB" class="qty-black">-</div>
+  </div>
+
+  <!-- 估算市值 -->
+  <div class="section-title" style="margin-top:1rem;">估算市值</div>
+  <div class="convert-grid-3">
+    <div id="valueA" class="value-red">-</div>
+    <div></div>
+    <div id="valueB" class="value-red">-</div>
+  </div>
+
+</div>
+
+<!-- 免責聲明 -->
+<div class="disclaimer">
+  投資一定有風險，<strong>投資有賺有賠</strong>，過去的績效不代表未來績效，市場價格可能因波動、流動性不足或其他因素而出現劇烈變化。<br>
+  本工具僅係以公開資料進行即時計算與換算示意，計算結果屬於<strong>簡化試算</strong>，未納入證券／ETF 交易相關之手續費、交易稅、證所稅、匯兌損益、滑價、盤後零股撮合規則、漲跌停機制、股利及配息再投資、除權息調整、標的更換、公司行號變更、合併／分割、下市、暫停交易等任何可能影響實際交易成本與結果之因素。<br>
+  任何價格、成交量或歷史數據可能因 API 提供單位、資料延遲、中斷、格式變更、計算誤差或系統錯誤而產生不正確或不完整之情況，本工具不保證資料之即時性、正確性與完整性，亦不負任何更新或維護之義務。<br>
+  本工具不構成任何形式之證券投資建議、推介、招攬、要約或保證報酬，亦未考量使用者之財務狀況、風險承受度、投資目標或稅務狀況。使用者應自行判斷是否適合進行相關投資或換股操作，並於必要時諮詢合格專業人士（如證券投資顧問、會計師或稅務顧問）。<br>
+  使用者使用本工具所做出之任何投資決策與交易行為，後果與風險概由使用者自行承擔，本工具開發者與提供者對於任何因使用或無法使用本工具而可能導致之損失、成本或責任（包括但不限於直接、間接、附帶、衍生或懲罰性損害賠償），概不負責。
+</div>
+
+<script>
+const BASE_URL = "https://api.finmindtrade.com/api/v4/data";
+let lastPriceA=null, lastPriceB=null, chart=null;
+
+function fmt(n,d=0){
+  return n.toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d});
+}
+
+function formatShares(n){
+  n=Math.floor(n);
+  if(n<1000) return fmt(n)+" 股";
+  let z=Math.floor(n/1000), g=n%1000;
+  if(g===0) return z+" 張";
+  return `${z} 張 ${fmt(g)} 股`;
+}
+
+function updateConvert(){
+  const qtyInput = document.getElementById("qtyA");
+  let q=parseFloat(qtyInput.value);
+  if(!lastPriceA||!lastPriceB||isNaN(q)||q<=0){
+    document.getElementById("valueA").textContent="-";
+    document.getElementById("qtyB").textContent="-";
+    document.getElementById("valueB").textContent="-";
+    return;
+  }
+
+  // 來源市值（可含小數，但只用來計算）
+  const valueA = q * lastPriceA;
+
+  // 目標股數：以市值 / 目標價格，再無條件捨去到整股
+  const rawQtyB = valueA / lastPriceB;
+  const intQtyB = Math.floor(rawQtyB);
+
+  // 目標市值：以「實際可取得股數」計算
+  const valueB = intQtyB * lastPriceB;
+
+  document.getElementById("valueA").textContent = fmt(valueA, 0);
+  document.getElementById("qtyB").textContent   = formatShares(intQtyB);
+  document.getElementById("valueB").textContent = fmt(valueB, 0);
+}
+
+async function fetchHist(id){
+  let now=new Date();
+  let end=now.toISOString().slice(0,10);
+  let start=new Date(now.getTime()-30*86400000).toISOString().slice(0,10);
+  let res=await axios.get(BASE_URL,{
+    params:{dataset:"TaiwanStockPrice",data_id:id,start_date:start,end_date:end}
+  });
+  if(res.data.status!==200) throw new Error(res.data.msg);
+  let arr=res.data.data;
+  arr.sort((a,b)=>a.date.localeCompare(b.date));
+  return arr;
+}
+
+function renderChart(a,b,sa,sb){
+  const ctx=document.getElementById("priceChart").getContext("2d");
+  const ds=new Set(); a.forEach(r=>ds.add(r.date)); b.forEach(r=>ds.add(r.date));
+  const labels=[...ds].sort();
+  const ma=new Map(a.map(r=>[r.date,r.close]));
+  const mb=new Map(b.map(r=>[r.date,r.close]));
+  const baseA=a[0].close, baseB=b[0].close;
+  const pA=labels.map(d=>ma.get(d)?((ma.get(d)/baseA-1)*100):null);
+  const pB=labels.map(d=>mb.get(d)?((mb.get(d)/baseB-1)*100):null);
+
+  if(chart) chart.destroy();
+  chart=new Chart(ctx,{
+    type:"line",
+    data:{labels,datasets:[
+      {label:sa+" %",data:pA,fill:false,tension:0.1},
+      {label:sb+" %",data:pB,fill:false,tension:0.1}
+    ]},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      scales:{y:{ticks:{callback:v=>v+"%"}}},
+      interaction:{mode:"index",intersect:false}
+    }
+  });
+}
+
+async function refresh(){
+  const A=document.getElementById("symbolA").value.trim();
+  const B=document.getElementById("symbolB").value.trim();
+  const s=document.getElementById("status");
+  s.textContent="載入中...";
+
+  try{
+    let [hA,hB]=await Promise.all([fetchHist(A),fetchHist(B)]);
+    lastPriceA=hA[hA.length-1].close;
+    lastPriceB=hB[hB.length-1].close;
+
+    document.getElementById("labelSymbolA").textContent=A;
+    document.getElementById("labelSymbolB").textContent=B;
+    document.getElementById("priceA").textContent=fmt(lastPriceA,2);
+    document.getElementById("priceB").textContent=fmt(lastPriceB,2);
+
+    renderChart(hA,hB,A,B);
+    updateConvert();
+    s.textContent="完成";
+  }catch(e){
+    s.textContent="錯誤："+e.message;
+  }
+}
+
+document.getElementById("btnFetch").addEventListener("click", refresh);
+document.getElementById("qtyA").addEventListener("input", updateConvert);
+
+refresh();
+</script>
+
+</body>
+</html>
