@@ -1,0 +1,80 @@
+//@version=5
+indicator("TWD Triple-Layer + Driver Detector (Emoji HUD)", overlay=true)
+
+// === 使用者輸入（請依你實際代碼調整） ===
+twdSym     = input.symbol("FX_IDC:USDTWD", "TWD FX (USD/TWD)")
+tsmcSym    = input.symbol("TWSE:2330", "TSMC 2330")
+etf0050Sym = input.symbol("TWSE:0050", "0050 ETF")
+dxySym     = input.symbol("TVC:DXY",     "DXY Index")
+soxSym     = input.symbol("NASDAQ:SOXX", "SOXX (SOX proxy)")
+
+corrLen   = input.int(60,  "Correlation length (bars)", minval=10)
+normLen   = input.int(100, "Normalization length",       minval=20)
+corrThres = input.float(0.4, "主因判定門檻 (|corr| >=)", minval=0.1, maxval=1.0, step=0.05)
+
+// === 取得各商品收盤價 ===
+twd   = request.security(twdSym,     timeframe.period, close)
+tsmc  = request.security(tsmcSym,    timeframe.period, close)
+etf50 = request.security(etf0050Sym, timeframe.period, close)
+dxy   = request.security(dxySym,     timeframe.period, close)
+sox   = request.security(soxSym,     timeframe.period, close)
+
+// === 簡單標準化：價格 / 最近 normLen 的平均 ===
+f_norm(src) =>
+    basis = ta.sma(src, normLen)
+    basis == 0.0 ? na : src / basis
+
+twdN   = f_norm(twd)
+tsmcN  = f_norm(tsmc)
+etf50N = f_norm(etf50)
+dxyN   = f_norm(dxy)
+soxN   = f_norm(sox)
+
+// === 主圖：三層結構 ===
+plot(twdN,   title="TWD (USD/TWD, normalized)",    color=color.red,    linewidth=3)
+plot(tsmcN,  title="TSMC 2330 (normalized)",       color=color.blue,   linewidth=2)
+plot(etf50N, title="0050 ETF (normalized)",        color=color.green,  linewidth=2)
+plot(dxyN,   title="DXY (normalized)",             color=color.orange, linewidth=1)
+plot(soxN,   title="SOXX (SOX proxy, normalized)", color=color.purple, linewidth=1)
+
+// === 相關係數計算 ===
+corr_twd_dxy  = ta.correlation(twd, dxy,  corrLen)
+corr_twd_sox  = ta.correlation(twd, sox,  corrLen)
+corr_twd_tsmc = ta.correlation(twd, tsmc, corrLen)
+
+absD = math.abs(corr_twd_dxy)
+absS = math.abs(corr_twd_sox)
+absE = math.abs(corr_twd_tsmc)
+maxAbs = math.max(absD, math.max(absS, absE))
+
+driverUSD = absD == maxAbs and absD >= corrThres
+driverSOX = absS == maxAbs and absS >= corrThres
+driverEQ  = absE == maxAbs and absE >= corrThres
+
+driver = driverUSD ? 1 : driverSOX ? 2 : driverEQ ? 3 : 0
+
+// 主因名稱與 emoji
+driverName  = driver == 1 ? "美元 DXY" : driver == 2 ? "全球科技 SOXX" : driver == 3 ? "本地股市 2330" : "混合 / 無明顯主導"
+driverEmoji = driver == 1 ? "🟧"       : driver == 2 ? "🟪"            : driver == 3 ? "🟦"            : "⬜️"
+
+// 背景顏色狀態燈
+bgColor =
+     driver == 1 ? color.new(color.orange, 85) :
+     driver == 2 ? color.new(color.purple, 85) :
+     driver == 3 ? color.new(color.blue,   85) :
+                   color.new(color.gray,   90)
+
+bgcolor(bgColor)
+
+// === 右上角固定資訊 label（單行，百分比顯示） ===
+var label infoLabel = na
+
+if barstate.islast
+    label.delete(infoLabel)
+    percD = absD * 100.0
+    percS = absS * 100.0
+    percE = absE * 100.0
+    txt = "主因 " + driverEmoji + " " + driverName + " | DXY=" + str.tostring(percD, "#.0") + "% SOXX=" + str.tostring(percS, "#.0") + "% 2330=" + str.tostring(percE, "#.0") + "%"
+    topVal = math.max(math.max(twdN, tsmcN), math.max(etf50N, math.max(dxyN, soxN)))
+    yPos = topVal + 0.15
+    infoLabel := label.new(bar_index, yPos, txt, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_right, textcolor=color.white, color=color.new(color.black, 40))
